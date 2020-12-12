@@ -6,6 +6,7 @@ from database import Table
 class MainGUI(tk.Tk):
     def __init__(self, db, *args, **kwargs):
         tk.Tk.__init__(self, *args, **kwargs)
+
         # Title this container
         self.title('Ping Pong Pong League')
         self.db = db
@@ -14,13 +15,18 @@ class MainGUI(tk.Tk):
         self.container = tk.Frame(self)
         self.container.pack()
 
+        # Make sure container always uses full screen, even if its child frames don't need it (useless fake label)
+        self.state('zoomed')
+        fake_label = tk.Label(self.container)
+        fake_label.grid(row=0, column=0, sticky='nsew', padx=self.winfo_screenwidth(), pady=self.winfo_screenheight())
+
         # Load all possible frames
         self.frames = {}
         for frame in (MainWindow, PlayerManagementWindow, EnterLeagueWindow, AddPlayerWindow, EditPlayerWindow,
                       AddRoleWindow):
             temp_frame = frame(self.container, self)
-            self.frames[frame] = temp_frame
             temp_frame.grid(row=0, column=0, sticky='nsew')
+            self.frames[frame] = temp_frame
 
         # Bring main frame to top
         self.show_frame(MainWindow)
