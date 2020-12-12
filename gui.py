@@ -135,7 +135,7 @@ class AddPlayerWindow(HomeFrame):
         self.controller.get_db().register_insert_callback(Table.ROLE, self.update_role_combobox)
         # Save and create player button
         self.button_create_player = tk.Button(self, text='Save and Create Player',
-                                              command=lambda: self.save_create_player(None))
+                                              command=self.save_create_player)
         self.button_create_player.grid(row=7, column=3)
         # Bind enter key to fields being entered
         self.entry_name.bind('<Return>', self.save_create_player)
@@ -149,7 +149,7 @@ class AddPlayerWindow(HomeFrame):
         for role in range(len(roles)):
             self.combobox_add_roles.insert(role, roles[role])
 
-    def save_create_player(self, _):
+    def save_create_player(self, _=None):
         # Check that this frame is on top
         if not self.controller.is_frame_top(AddPlayerWindow):
             return
@@ -212,8 +212,7 @@ class AddRoleWindow(HomeFrame):
         self.entry_add_role = tk.Entry(self.frame_add_role, width=50)
         self.entry_add_role.grid(row=2, column=1, pady=5)
         # Add role button
-        self.button_add_role = tk.Button(self.frame_add_role, text='Add Role',
-                                         command=lambda: self.add_role(None))
+        self.button_add_role = tk.Button(self.frame_add_role, text='Add Role', command=self.add_role)
         self.button_add_role.grid(row=3, column=1)
         # Bind enter key to text field being entered
         self.entry_add_role.bind('<Return>', self.add_role)
@@ -223,7 +222,7 @@ class AddRoleWindow(HomeFrame):
         text = 'Existing Roles:\n\n' + '\n'.join(sorted(self.controller.get_db().get_role_names()))
         self.label_current_roles.config(text=text)
 
-    def add_role(self, _):
+    def add_role(self, _=None):
         # Check that this frame is on top
         if not self.controller.is_frame_top(AddRoleWindow):
             return
