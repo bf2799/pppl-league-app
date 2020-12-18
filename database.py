@@ -86,22 +86,21 @@ class PPPLDatabase:
             """)
             self.db_cursor.execute("""
                 create table season (
-                    season_id int not null unique auto_increment,
                     start_date date not null unique,
                     end_date date unique,
                     postseason_start_game int unsigned not null,
-                    primary key (season_id)
+                    primary key (start_date)
                 )
             """)
             self.db_cursor.execute("""
                 create table game (
                     game_id int not null unique auto_increment,
-                    season_id int not null,
+                    season date not null,
                     game_number int not null,
                     home_player_id int not null,
                     away_player_id int not null,
                     primary key (game_id),
-                    foreign key (season_id) references season(season_id),
+                    foreign key (season) references season(start_date),
                     foreign key (home_player_id) references player(player_id),
                     foreign key (away_player_id) references player(player_id)
                 )
@@ -257,7 +256,48 @@ class PPPLDatabase:
         except Exception:
             error_reporting.report_error(get_error())
 
+    def get_season_start_dates(self):
+        try:
+            self.db_cursor.execute("""
+                select start_date
+                from season
+            """)
+            raw_result = self.db_cursor.fetchall()
+            if len(raw_result) == 0:
+                return []
+            result = [row[0] for row in raw_result]
+            return result
+        except Exception:
+            error_reporting.report_error(get_error())
+
+    def get_next_unplayed_game_details(self):
+        try:
+            self.db_cursor.execute("""
+                select 
+                    g.game_id,
+                    g.season,
+                    g.game_number,
+                    p_home.name as 'home_player_name',
+                    p_away.name as 'away_player_name'
+                from game g
+                inner join player p_home on (g.home_player_id = p_home.player_id)
+                inner join player p_away on (g.away_player_id = p_away.player_id)
+                where g.game_id not in (
+                    select game_id
+                    from player_game
+                )
+                order by g.season, g.game_number
+                limit 1
+            """)
+            raw_result = self.db_cursor.fetchall()
+            if len(raw_result) == 0:
+                return []
+            return raw_result[0]
+        except Exception:
+            error_reporting.report_error(get_error())
+
     # REGISTER CALLBACKS FOR UPDATES/INSERT REPORTING
+
     def register_insert_callback(self, table: Table, callback):
         if table in Table:
             self.insertion_callbacks_dict[table].append(callback)
