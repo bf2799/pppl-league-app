@@ -160,12 +160,11 @@ class AddPlayerWindow(HomeFrame):
             return
         # Check if player name already exists or there is no player name, stopping if so
         if self.entry_name.get() == '':
-            self.entry_name.delete(0, 'end')
-            self.entry_name.insert(0, 'Name field is empty')
+            error_reporting.report_warning('Name field is empty')
             return
         elif self.controller.get_db().is_player_in_db(self.entry_name.get()):
             self.entry_name.delete(0, 'end')
-            self.entry_name.insert(0, 'Name already exists')
+            error_reporting.report_warning('Name already exists')
             return
         # Save new player to database
         try:
@@ -244,12 +243,11 @@ class AddRoleWindow(HomeFrame):
             return
         # Check if role name already exists or there is no role name, stopping if so
         if self.entry_add_role.get() == '':
-            self.entry_add_role.delete(0, 'end')
-            self.entry_add_role.insert(0, 'Role field is empty')
+            error_reporting.report_warning('Role field is empty')
             return
         elif self.controller.get_db().is_role_in_db(self.entry_add_role.get()):
             self.entry_add_role.delete(0, 'end')
-            self.entry_add_role.insert(0, 'Role already exists')
+            error_reporting.report_warning('Role already exists')
             return
         # Save new role to database
         self.controller.get_db().insert_role(self.entry_add_role.get())
