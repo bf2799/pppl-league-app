@@ -257,6 +257,44 @@ class PPPLDatabase:
         for callback in self.insertion_callbacks_dict[Table.FOOTWEAR]:
             callback()
 
+    def insert_season(self, start_date, postseason_start_game, end_date=None):
+        try:
+            self.db_cursor.execute("""
+                insert into season (start_date, postseason_start_game""" +
+                                   (""", end_date""" if end_date is not None else '') + """)
+                values (
+                    '""" + start_date.strftime('%Y-%m-%d') + "'," +
+                    str(postseason_start_game) +
+                    (", '" + end_date.strftime('%Y-%m-%d') + "'" if end_date is not None else '') +
+                """)
+            """)
+            self.db_connection.commit()
+        except Exception:
+            error_reporting.report_error(get_error())
+            return
+        # Perform callbacks upon successful insertion of player game
+        for callback in self.insertion_callbacks_dict[Table.SEASON]:
+            callback()
+
+    def insert_game(self, season, game_number, home_player_id, away_player_id):
+        try:
+            self.db_cursor.execute("""
+                insert into game (season, game_number, home_player_id, away_player_id)
+                values (
+                    '""" + season.strftime('%Y-%m-%d') + "'," +
+                    str(game_number) + ',' +
+                    str(home_player_id) + ',' +
+                    str(away_player_id) + """
+                )
+            """)
+            self.db_connection.commit()
+        except Exception:
+            error_reporting.report_error(get_error())
+            return
+        # Perform callbacks upon successful insertion of player game
+        for callback in self.insertion_callbacks_dict[Table.GAME]:
+            callback()
+    
     # SELECT RETURNING BOOLEAN
 
     def is_player_in_db(self, player_name):
@@ -351,6 +389,21 @@ class PPPLDatabase:
                 select footwear_id
                 from footwear
                 where footwear_name = '""" + footwear_name + """'
+                limit 1
+            """)
+            raw_result = self.db_cursor.fetchall()
+            if len(raw_result) == 0:
+                return -1
+            return raw_result[0][0]
+        except Exception:
+            error_reporting.report_error(get_error())
+
+    def get_player_id(self, player_name):
+        try:
+            self.db_cursor.execute("""
+                select player_id
+                from player
+                where name = '""" + player_name + """'
                 limit 1
             """)
             raw_result = self.db_cursor.fetchall()

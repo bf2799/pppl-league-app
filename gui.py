@@ -5,6 +5,9 @@ from database import Table
 from PIL import Image, ImageTk
 import io
 import error_reporting
+import tkcalendar
+import datetime
+import analysis
 
 MAX_CUPS = 10  # Number of cups to get in game, useful for verification in GUI
 
@@ -373,11 +376,79 @@ class ScheduleWindow(HomeFrame):
 class NewSeasonWindow(HomeFrame):
     def __init__(self, parent, controller):
         HomeFrame.__init__(self, parent, controller)
+        self.button_home.config(command=self.go_home)
         self.controller = controller
         # Back button
-        self.button_back = tk.Button(self, text='<--Back',
-                                     command=lambda: controller.show_frame(EnterLeagueWindow))
+        self.button_back = tk.Button(self, text='<--Back', command=self.go_back)
         self.button_back.grid(row=2, column=1, sticky='w')
+        # Number of games label
+        self.label_num_games = tk.Label(self, text='Games / Player')
+        self.label_num_games.grid(row=3, column=2, sticky='e')
+        # Number of games spinbox
+        self.spinbox_num_games = tk.Spinbox(self, from_=0, to_=1000, width=5)
+        self.spinbox_num_games.grid(row=3, column=3, sticky='w', pady=5, padx=5)
+        # Season start date label
+        self.label_start_date = tk.Label(self, text='Start Date')
+        self.label_start_date.grid(row=4, column=2, sticky='e')
+        # Season start date entry
+        self.date_entry_start_date = tkcalendar.DateEntry(self, firstweekday='sunday', showweeknumbers=False,
+                                                          date_pattern='y-mm-dd')
+        self.date_entry_start_date.grid(row=4, column=3, sticky='w', pady=5, padx=5)
+        # Players label
+        self.label_players = tk.Label(self, text='Players')
+        self.label_players.grid(row=5, column=2, sticky='e')
+        # Players listbox
+        self.listbox_players = tk.Listbox(self, selectmode='multiple', width=30)
+        self.listbox_players.grid(row=5, column=3, sticky='w', pady=5, padx=5)
+        self.controller.get_db().register_insert_callback(Table.PLAYER, self.update_player_listbox)
+        # Submit button
+        self.button_submit = tk.Button(self, text='Submit', command=self.submit_new_season)
+        self.button_submit.grid(row=6, column=3, sticky='w', padx=5, pady=5)
+
+    def go_home(self):
+        self.reset_entries()
+        self.controller.show_frame(MainWindow)
+
+    def go_back(self):
+        self.reset_entries()
+        self.controller.show_frame(EnterLeagueWindow)
+
+    def reset_entries(self):
+        self.spinbox_num_games.delete(0, 'end')
+        self.spinbox_num_games.insert(0, '0')
+        self.date_entry_start_date.set_date(datetime.datetime.now())
+        self.listbox_players.selection_clear(0, 'end')
+
+    def update_player_listbox(self):
+        players = self.controller.get_db().get_player_names()
+        players.sort()
+        self.listbox_players.delete(0, 'end')
+        for player in range(len(players)):
+            self.listbox_players.insert(player, players[player])
+
+    def submit_new_season(self):
+        # Check all user-entered values and players are valid
+        if eval(self.spinbox_num_games.get()) <= 0:
+            error_reporting.report_warning('Invalid number of games per player')
+            return
+        if len(self.listbox_players.curselection()) <= 0:
+            error_reporting.report_warning('No players selected for the new season')
+            return
+        if self.date_entry_start_date.get_date() in self.controller.get_db().get_season_start_dates():
+            error_reporting.report_warning('Existing season already started on date entered')
+            return
+        players = [self.listbox_players.get(player) for player in self.listbox_players.curselection()]
+        player_ids = [self.controller.get_db().get_player_id(name) for name in players]
+        if -1 in player_ids:
+            error_reporting.report_error('Database error. A player name did not match any known entries.')
+            return
+        # Enter new season into database
+        schedule = analysis.generate_new_schedule(eval(self.spinbox_num_games.get()), player_ids)
+        self.controller.get_db().insert_season(self.date_entry_start_date.get_date(), len(schedule) + 1)
+        for game in range(len(schedule)):
+            self.controller.get_db().insert_game(self.date_entry_start_date.get_date(), game + 1, schedule[game][0],
+                                                 schedule[game][1])
+        self.reset_entries()
 
 
 class LiveGameWindow(tk.Frame):
