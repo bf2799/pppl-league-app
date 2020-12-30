@@ -2,6 +2,11 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
 from database import Table
+from PIL import Image, ImageTk
+import io
+import error_reporting
+
+MAX_CUPS = 10  # Number of cups to get in game, useful for verification in GUI
 
 
 class MainGUI(tk.Tk):
@@ -41,6 +46,9 @@ class MainGUI(tk.Tk):
 
     def is_frame_top(self, container):
         return self.frames[container] == self.container.winfo_children()[-1]
+
+    def get_frame(self, container):
+        return self.frames[container]
 
 
 class HomeFrame(tk.Frame):
@@ -162,9 +170,11 @@ class AddPlayerWindow(HomeFrame):
         # Save new player to database
         try:
             logo_bin = open(self.entry_logo.get(), 'rb').read()
-            headshot_bin = open(self.entry_headshot.get(), 'rb').read()
         except Exception:
             logo_bin = None
+        try:
+            headshot_bin = open(self.entry_headshot.get(), 'rb').read()
+        except Exception:
             headshot_bin = None
         self.controller.get_db().insert_player(self.entry_name.get(), logo_bin, headshot_bin)
         # Save new player's roles to database
@@ -258,9 +268,9 @@ class EnterLeagueWindow(HomeFrame):
         self.label_choose_season = tk.Label(self.frame_season_view, text='Choose Season\nStart Date')
         self.label_choose_season.grid(row=1, column=1, padx=5)
         # Season option menu
-        self.current_season = tk.StringVar(self)
+        self.selected_season = tk.StringVar(self)
         self.option_menu_season_options = ['']
-        self.option_menu_season = tk.OptionMenu(self.frame_season_view, self.current_season,
+        self.option_menu_season = tk.OptionMenu(self.frame_season_view, self.selected_season,
                                                 *self.option_menu_season_options)
         self.option_menu_season.grid(row=2, column=1, padx=5)
         self.controller.get_db().register_insert_callback(Table.SEASON, self.update_season_options)
@@ -289,7 +299,7 @@ class EnterLeagueWindow(HomeFrame):
         # Next game label
         self.label_next_game = tk.Label(self.frame_next_game, text='Next Game')
         self.label_next_game.grid(row=1, column=1, padx=5)
-        # Game details message
+        # Next game details message
         self.message_game_details = tk.Message(self.frame_next_game, justify='center')
         self.message_game_details.grid(row=2, column=1, padx=5)
         self.controller.get_db().register_insert_callback(Table.SEASON, self.update_game_details_message)
@@ -307,16 +317,17 @@ class EnterLeagueWindow(HomeFrame):
         self.option_menu_season_options = self.controller.get_db().get_season_start_dates()
         self.option_menu_season_options = [date.strftime('%m/%d/%Y') for date in self.option_menu_season_options]
         self.option_menu_season_options.sort(reverse=True)
-        self.current_season.set('')
+        self.selected_season.set('')
         self.option_menu_season['menu'].delete(0, 'end')
         for new_option in self.option_menu_season_options:
             self.option_menu_season['menu'].add_command(label=new_option,
-                                                        command=tk._setit(self.current_season, new_option))
+                                                        command=tk._setit(self.selected_season, new_option))
 
     def update_game_details_message(self):
         next_unplayed_game_details = self.controller.get_db().get_next_unplayed_game_details()
         if len(next_unplayed_game_details) == 0:
             game_details_text = "No Upcoming Games"
+            self.button_play_game.config(state='disabled')
         else:
             self.next_unplayed_game_id = next_unplayed_game_details[0]
             season = next_unplayed_game_details[1].strftime('%m/%d/%Y')
@@ -324,7 +335,11 @@ class EnterLeagueWindow(HomeFrame):
             home_player = next_unplayed_game_details[3]
             away_player = next_unplayed_game_details[4]
             game_details_text = "{} @ {}\nGame {}\n Season {} ".format(away_player, home_player, game_number, season)
+            self.button_play_game.config(state='normal')
         self.message_game_details.config(text=game_details_text)
+
+    def get_selected_season(self):
+        return self.selected_season
 
 
 class StatsWindow(HomeFrame):
@@ -367,14 +382,339 @@ class NewSeasonWindow(HomeFrame):
         self.button_back.grid(row=2, column=1, sticky='w')
 
 
-class LiveGameWindow(HomeFrame):
+class LiveGameWindow(tk.Frame):
     def __init__(self, parent, controller):
-        HomeFrame.__init__(self, parent, controller)
+        self.IMAGE_SIZE_PX = (100, 100)
+        tk.Frame.__init__(self, parent)
         self.controller = controller
-        # Back button
-        self.button_back = tk.Button(self, text='<--Back',
-                                     command=lambda: controller.show_frame(EnterLeagueWindow))
-        self.button_back.grid(row=2, column=1, sticky='w')
+        # Game info label
+        self.label_game_info = tk.Label(self, justify='center')
+        self.label_game_info.grid(row=1, column=1, pady=10)
+        # Live players frame
+        self.frame_players = tk.Frame(self)
+        self.frame_players.grid(row=2, column=1, pady=10)
+        # Home player frame
+        self.frame_home_player = tk.Frame(self.frame_players)
+        self.frame_home_player.grid(row=1, column=2, padx=20, sticky='s')
+        # Home player name frame
+        self.frame_home_player_name = tk.Frame(self.frame_home_player)
+        self.frame_home_player_name.grid(row=1, column=1, pady=5)
+        # Home label
+        self.label_home = tk.Label(self.frame_home_player_name, text='Home')
+        self.label_home.grid(row=1, column=1, columnspan=2)
+        # Home player name label
+        self.label_home_player_name = tk.Label(self.frame_home_player_name)
+        self.label_home_player_name.grid(row=2, column=1, columnspan=2)
+        # Home player logo label
+        self.label_home_player_logo = tk.Label(self.frame_home_player_name)
+        self.label_home_player_logo.grid(row=3, column=1)
+        # Home player headshot label
+        self.label_home_player_headshot = tk.Label(self.frame_home_player_name)
+        self.label_home_player_headshot.grid(row=3, column=2)
+        # Home player note stats frame
+        self.frame_home_player_note_stats = tk.Frame(self.frame_home_player)
+        self.frame_home_player_note_stats.grid(row=2, column=1, pady=5)
+        # Home player footwear label
+        self.label_home_player_footwear = tk.Label(self.frame_home_player_note_stats, text='Footwear')
+        self.label_home_player_footwear.grid(row=1, column=1)
+        # Home player footwear combobox
+        self.combobox_home_player_footwear = ttk.Combobox(self.frame_home_player_note_stats, width=30)
+        self.combobox_home_player_footwear.grid(row=2, column=1)
+        # Home player number stats frame
+        self.frame_home_player_num_stats = tk.Frame(self.frame_home_player)
+        self.frame_home_player_num_stats.grid(row=3, column=1, pady=5)
+        # Home player knockovers label
+        self.label_home_player_knockovers = tk.Label(self.frame_home_player_num_stats, text='Knockovers')
+        self.label_home_player_knockovers.grid(row=1, column=1, padx=5)
+        # Home player knockovers spinbox
+        self.spinbox_home_player_knockovers = tk.Spinbox(self.frame_home_player_num_stats, from_=0, to_=10, width=4,
+                                                         wrap=True)
+        self.spinbox_home_player_knockovers.grid(row=2, column=1, padx=5)
+        # Home player own cups label
+        self.label_home_player_own_cups = tk.Label(self.frame_home_player_num_stats, text='Own Cups')
+        self.label_home_player_own_cups.grid(row=1, column=2, padx=5)
+        # Home player own cups spinbox
+        self.spinbox_home_player_own_cups = tk.Spinbox(self.frame_home_player_num_stats, from_=0, to_=10, width=4,
+                                                       wrap=True)
+        self.spinbox_home_player_own_cups.grid(row=2, column=2, padx=5)
+        # Home player aces label
+        self.label_home_player_aces = tk.Label(self.frame_home_player_num_stats, text='Aces')
+        self.label_home_player_aces.grid(row=1, column=3, padx=5, sticky='w')
+        # Home player aces spinbox
+        self.spinbox_home_player_aces = tk.Spinbox(self.frame_home_player_num_stats, from_=0, to_=10, width=4,
+                                                   wrap=True)
+        self.spinbox_home_player_aces.grid(row=2, column=3, padx=5)
+        # Home player serve breaks label
+        self.label_home_player_serve_breaks = tk.Label(self.frame_home_player_num_stats, text='Serve Breaks')
+        self.label_home_player_serve_breaks.grid(row=1, column=4, padx=5)
+        # Home player serve breaks spinbox
+        self.spinbox_home_player_serve_breaks = tk.Spinbox(self.frame_home_player_num_stats, from_=0, to_=10, width=4,
+                                                           wrap=True)
+        self.spinbox_home_player_serve_breaks.grid(row=2, column=4, padx=5)
+        # Home player rate stats frame
+        self.frame_home_player_rate_stats = tk.Frame(self.frame_home_player)
+        self.frame_home_player_rate_stats.grid(row=4, column=1, pady=5)
+        # Home player penalty shots label
+        self.label_home_player_penalty_shots = tk.Label(self.frame_home_player_rate_stats, text='Penalty Shots')
+        self.label_home_player_penalty_shots.grid(row=1, column=1, columnspan=3)
+        # Home player penalty shots made spinbox
+        self.spinbox_home_player_psm = tk.Spinbox(self.frame_home_player_rate_stats, from_=0, to_=10, width=3,
+                                                  wrap=True)
+        self.spinbox_home_player_psm.grid(row=2, column=1)
+        # Home player penalty shots division label
+        self.label_home_player_ps_div = tk.Label(self.frame_home_player_rate_stats, text='/')
+        self.label_home_player_ps_div.grid(row=2, column=2)
+        # Home player penalty shots attempted spinbox
+        self.spinbox_home_player_psa = tk.Spinbox(self.frame_home_player_rate_stats, from_=0, to_=10, width=3,
+                                                  wrap=True)
+        self.spinbox_home_player_psa.grid(row=2, column=3)
+        # Away player frame
+        self.frame_away_player = tk.Frame(self.frame_players)
+        self.frame_away_player.grid(row=1, column=1, padx=20, sticky='s')
+        # Away player name frame
+        self.frame_away_player_name = tk.Frame(self.frame_away_player)
+        self.frame_away_player_name.grid(row=1, column=1, pady=5)
+        # Away label
+        self.label_away = tk.Label(self.frame_away_player_name, text='Away')
+        self.label_away.grid(row=1, column=1, columnspan=2)
+        # Away player name label
+        self.label_away_player_name = tk.Label(self.frame_away_player_name)
+        self.label_away_player_name.grid(row=2, column=1, columnspan=2)
+        # Away player logo label
+        self.label_away_player_logo = tk.Label(self.frame_away_player_name)
+        self.label_away_player_logo.grid(row=3, column=1)
+        # Away player headshot label
+        self.label_away_player_headshot = tk.Label(self.frame_away_player_name)
+        self.label_away_player_headshot.grid(row=3, column=2)
+        # Away player note stats frame
+        self.frame_away_player_note_stats = tk.Frame(self.frame_away_player)
+        self.frame_away_player_note_stats.grid(row=2, column=1, pady=5)
+        # Away player footwear label
+        self.label_away_player_footwear = tk.Label(self.frame_away_player_note_stats, text='Footwear')
+        self.label_away_player_footwear.grid(row=1, column=1)
+        # Away player footwear combobox
+        self.combobox_away_player_footwear = ttk.Combobox(self.frame_away_player_note_stats, width=30)
+        self.combobox_away_player_footwear.grid(row=2, column=1)
+        # Away player number stats frame
+        self.frame_away_player_num_stats = tk.Frame(self.frame_away_player)
+        self.frame_away_player_num_stats.grid(row=3, column=1, pady=5)
+        # Away player knockovers label
+        self.label_away_player_knockovers = tk.Label(self.frame_away_player_num_stats, text='Knockovers')
+        self.label_away_player_knockovers.grid(row=1, column=1, padx=5)
+        # Away player knockovers spinbox
+        self.spinbox_away_player_knockovers = tk.Spinbox(self.frame_away_player_num_stats, from_=0, to_=10, width=4,
+                                                         wrap=True)
+        self.spinbox_away_player_knockovers.grid(row=2, column=1, padx=5)
+        # Away player own cups label
+        self.label_away_player_own_cups = tk.Label(self.frame_away_player_num_stats, text='Own Cups')
+        self.label_away_player_own_cups.grid(row=1, column=2, padx=5)
+        # Away player own cups spinbox
+        self.spinbox_away_player_own_cups = tk.Spinbox(self.frame_away_player_num_stats, from_=0, to_=10, width=4,
+                                                       wrap=True)
+        self.spinbox_away_player_own_cups.grid(row=2, column=2, padx=5)
+        # Away player aces label
+        self.label_away_player_aces = tk.Label(self.frame_away_player_num_stats, text='Aces')
+        self.label_away_player_aces.grid(row=1, column=3, padx=5, sticky='w')
+        # Away player aces spinbox
+        self.spinbox_away_player_aces = tk.Spinbox(self.frame_away_player_num_stats, from_=0, to_=10, width=4,
+                                                   wrap=True)
+        self.spinbox_away_player_aces.grid(row=2, column=3, padx=5)
+        # Away player serve breaks label
+        self.label_away_player_serve_breaks = tk.Label(self.frame_away_player_num_stats, text='Serve Breaks')
+        self.label_away_player_serve_breaks.grid(row=1, column=4, padx=5)
+        # Away player serve breaks spinbox
+        self.spinbox_away_player_serve_breaks = tk.Spinbox(self.frame_away_player_num_stats, from_=0, to_=10, width=4,
+                                                           wrap=True)
+        self.spinbox_away_player_serve_breaks.grid(row=2, column=4, padx=5)
+        # Away player rate stats frame
+        self.frame_away_player_rate_stats = tk.Frame(self.frame_away_player)
+        self.frame_away_player_rate_stats.grid(row=4, column=1, pady=5)
+        # Away player penalty shots label
+        self.label_away_player_penalty_shots = tk.Label(self.frame_away_player_rate_stats, text='Penalty Shots')
+        self.label_away_player_penalty_shots.grid(row=1, column=1, columnspan=3)
+        # Away player penalty shots made spinbox
+        self.spinbox_away_player_psm = tk.Spinbox(self.frame_away_player_rate_stats, from_=0, to_=10, width=3,
+                                                  wrap=True)
+        self.spinbox_away_player_psm.grid(row=2, column=1)
+        # Away player penalty shots division label
+        self.label_away_player_ps_div = tk.Label(self.frame_away_player_rate_stats, text='/')
+        self.label_away_player_ps_div.grid(row=2, column=2)
+        # Away player penalty shots attempted spinbox
+        self.spinbox_away_player_psa = tk.Spinbox(self.frame_away_player_rate_stats, from_=0, to_=10, width=3,
+                                                  wrap=True)
+        self.spinbox_away_player_psa.grid(row=2, column=3)
+        # Game outcome frame
+        self.frame_game_outcome = tk.Frame(self)
+        self.frame_game_outcome.grid(row=3, column=1, pady=5)
+        # Winner label
+        self.label_winner = tk.Label(self.frame_game_outcome, text='Winner')
+        self.label_winner.grid(row=1, column=1)
+        # Winner radiobutton
+        self.winner = tk.StringVar()
+        self.radiobutton_winner_home = tk.Radiobutton(self.frame_game_outcome, value='home', variable=self.winner)
+        self.radiobutton_winner_home.grid(row=2, column=1, sticky='w')
+        self.radiobutton_winner_away = tk.Radiobutton(self.frame_game_outcome, value='away', variable=self.winner)
+        self.radiobutton_winner_away.grid(row=3, column=1, sticky='w')
+        # Differential label
+        self.label_differential = tk.Label(self.frame_game_outcome, text='Differential')
+        self.label_differential.grid(row=4, column=1)
+        # Differential spinbox
+        self.spinbox_differential = tk.Spinbox(self.frame_game_outcome, from_=0, to_=10, width=4, wrap=True)
+        self.spinbox_differential.grid(row=5, column=1)
+        # Completed game action frame
+        self.frame_completed_game_action = tk.Frame(self)
+        self.frame_completed_game_action.grid(row=4, column=1, pady=5)
+        # Cancel game button
+        self.button_cancel = tk.Button(self.frame_completed_game_action, text='Cancel Game',
+                                       command=self.cancel_game)
+        self.button_cancel.grid(row=1, column=1, padx=10)
+        # Submit game button
+        self.button_submit = tk.Button(self.frame_completed_game_action, text='Submit Game',
+                                       command=self.submit_game)
+        self.button_submit.grid(row=1, column=2, padx=10)
+        # Set up callbacks for updating text for next unplayed game details
+        self.controller.get_db().register_insert_callback(Table.SEASON, self.update_game_details)
+        self.controller.get_db().register_insert_callback(Table.GAME, self.update_game_details)
+        self.controller.get_db().register_insert_callback(Table.PLAYER_GAME, self.update_game_details)
+        self.controller.get_db().register_insert_callback(Table.FOOTWEAR, self.update_footwear_options)
+
+    def update_game_details(self):
+        next_unplayed_game_details = self.controller.get_db().get_next_unplayed_game_details()
+        # This window should never be opened if there isn't another unplayed game
+        # If there is, make sure the game can't be submitted but don't bother updating any information
+        if len(next_unplayed_game_details) == 0:
+            self.button_submit.config(state='disabled')
+            return
+        # Update game info label
+        game_info_text = "Game " + str(next_unplayed_game_details[2]) + \
+                         "\nSeason " + str(next_unplayed_game_details[1].strftime('%m/%d/%Y'))
+        self.label_game_info.config(text=game_info_text)
+        # Update home player details
+        home_player_details = self.controller.get_db().get_player_details(next_unplayed_game_details[3])
+        if len(home_player_details) == 0:
+            self.button_submit.config(state='disabled')
+            return
+        if home_player_details[1] is not None:
+            logo = ImageTk.PhotoImage(Image.open(io.BytesIO(home_player_details[1])).resize(self.IMAGE_SIZE_PX))
+            self.label_home_player_logo.config(image=logo)
+            self.label_home_player_logo.image = logo
+        else:
+            self.label_home_player_logo.config(image=None)
+            self.label_home_player_logo.image = None
+        if home_player_details[2] is not None:
+            headshot = ImageTk.PhotoImage(Image.open(io.BytesIO(home_player_details[2])).resize(self.IMAGE_SIZE_PX))
+            self.label_home_player_headshot.config(image=headshot)
+            self.label_home_player_headshot.image = headshot
+        else:
+            self.label_home_player_headshot.config(image=None)
+            self.label_home_player_headshot.image = None
+        self.label_home_player_name.config(text=home_player_details[0].upper())
+        # Update away player details
+        away_player_details = self.controller.get_db().get_player_details(next_unplayed_game_details[4])
+        if len(away_player_details) == 0:
+            self.button_submit.config(state='disabled')
+            return
+        if away_player_details[1] is not None:
+            logo = ImageTk.PhotoImage(Image.open(io.BytesIO(away_player_details[1])).resize(self.IMAGE_SIZE_PX))
+            self.label_away_player_logo.config(image=logo)
+            self.label_away_player_logo.image = logo
+        else:
+            self.label_away_player_logo.config(image=None)
+            self.label_away_player_logo.image = None
+        if away_player_details[2] is not None:
+            headshot = ImageTk.PhotoImage(Image.open(io.BytesIO(away_player_details[2])).resize(self.IMAGE_SIZE_PX))
+            self.label_away_player_headshot.config(image=headshot)
+            self.label_away_player_headshot.image = headshot
+        else:
+            self.label_away_player_headshot.config(image=None)
+            self.label_away_player_headshot.image = None
+        self.label_away_player_name.config(text=away_player_details[0].upper())
+        self.button_submit.config(state='normal')
+        # Update winner choices
+        self.radiobutton_winner_home.config(text=home_player_details[0].upper())
+        self.radiobutton_winner_away.config(text=away_player_details[0].upper())
+
+    def update_footwear_options(self):
+        current_footwear = self.controller.get_db().get_footwear_names()
+        current_footwear.sort()
+        self.combobox_home_player_footwear.config(values=current_footwear)
+        self.combobox_away_player_footwear.config(values=current_footwear)
+
+    def reset_entries(self):
+        self.combobox_home_player_footwear.delete(0, 'end')
+        self.spinbox_home_player_knockovers.delete(0, 'end')
+        self.spinbox_home_player_knockovers.insert(0, 0)
+        self.spinbox_home_player_own_cups.delete(0, 'end')
+        self.spinbox_home_player_own_cups.insert(0, 0)
+        self.spinbox_home_player_aces.delete(0, 'end')
+        self.spinbox_home_player_aces.insert(0, 0)
+        self.spinbox_home_player_serve_breaks.delete(0, 'end')
+        self.spinbox_home_player_serve_breaks.insert(0, 0)
+        self.spinbox_home_player_psm.delete(0, 'end')
+        self.spinbox_home_player_psm.insert(0, 0)
+        self.spinbox_home_player_psa.delete(0, 'end')
+        self.spinbox_home_player_psa.insert(0, 0)
+        self.combobox_away_player_footwear.delete(0, 'end')
+        self.spinbox_away_player_knockovers.delete(0, 'end')
+        self.spinbox_away_player_knockovers.insert(0, 0)
+        self.spinbox_away_player_own_cups.delete(0, 'end')
+        self.spinbox_away_player_own_cups.insert(0, 0)
+        self.spinbox_away_player_aces.delete(0, 'end')
+        self.spinbox_away_player_aces.insert(0, 0)
+        self.spinbox_away_player_serve_breaks.delete(0, 'end')
+        self.spinbox_away_player_serve_breaks.insert(0, 0)
+        self.spinbox_away_player_psm.delete(0, 'end')
+        self.spinbox_away_player_psm.insert(0, 0)
+        self.spinbox_away_player_psa.delete(0, 'end')
+        self.spinbox_away_player_psa.insert(0, 0)
+        self.spinbox_differential.delete(0, 'end')
+        self.spinbox_differential.insert(0, 0)
+        self.radiobutton_winner_home.deselect()
+        self.radiobutton_winner_away.deselect()
+
+    def cancel_game(self):
+        self.reset_entries()
+        self.controller.show_frame(EnterLeagueWindow)
+
+    def submit_game(self):
+        # If no winner declared, differential must be 0 for a tie. Stop submitting if this isn't the case
+        if len(self.winner.get()) == 0 and self.spinbox_differential.get() != 0:
+            error_reporting.report_warning('No winner chosen')
+            return
+        if len(self.combobox_home_player_footwear.get()) == 0 or len(self.combobox_away_player_footwear.get()) == 0:
+            error_reporting.report_warning('No footwear entered')
+            return
+        next_unplayed_game_details = self.controller.get_db().get_next_unplayed_game_details()
+        home_player_details = self.controller.get_db().get_player_details(next_unplayed_game_details[3])
+        away_player_details = self.controller.get_db().get_player_details(next_unplayed_game_details[4])
+        # Insert home player to database
+        current_footwear = self.combobox_home_player_footwear.get()
+        self.controller.get_db().insert_footwear(current_footwear)
+        footwear_id = self.controller.get_db().get_footwear_id(current_footwear)
+        differential = ('-' if self.winner.get() == 'away' else '') + self.spinbox_differential.get()
+        self.controller.get_db().insert_player_game(
+            player_id=home_player_details[3], game_id=next_unplayed_game_details[0], footwear_id=footwear_id,
+            differential=differential, knockovers=self.spinbox_home_player_knockovers.get(),
+            own_cups=self.spinbox_home_player_own_cups.get(), aces=self.spinbox_home_player_aces.get(),
+            serve_breaks=self.spinbox_home_player_serve_breaks.get(),
+            penalty_shots_made=self.spinbox_home_player_psm.get(),
+            penalty_shots_attempted=self.spinbox_home_player_psa.get(),
+            penalties_committed=self.spinbox_away_player_psa.get())
+        # Insert away player to database
+        current_footwear = self.combobox_away_player_footwear.get()
+        self.controller.get_db().insert_footwear(current_footwear)
+        footwear_id = self.controller.get_db().get_footwear_id(current_footwear)
+        differential = ('-' if self.winner.get() == 'home' else '') + self.spinbox_differential.get()
+        self.controller.get_db().insert_player_game(
+            player_id=away_player_details[3], game_id=next_unplayed_game_details[0], footwear_id=footwear_id,
+            differential=differential, knockovers=self.spinbox_away_player_knockovers.get(),
+            own_cups=self.spinbox_away_player_own_cups.get(), aces=self.spinbox_away_player_aces.get(),
+            serve_breaks=self.spinbox_away_player_serve_breaks.get(),
+            penalty_shots_made=self.spinbox_away_player_psm.get(),
+            penalty_shots_attempted=self.spinbox_away_player_psa.get(),
+            penalties_committed=self.spinbox_home_player_psa.get())
+        self.reset_entries()
+        self.controller.show_frame(EnterLeagueWindow)
 
 
 def browse_files_for_entry(entry):

@@ -22,12 +22,13 @@ class PPPLDatabase:
         for table in Table:  # Each table successfully inserting may trigger different callbacks
             self.insertion_callbacks_dict[table] = []
 
-    def connect_server(self, host, user, password):
+    def connect_server(self, host, user, password, b_reset_schema=False):
         """
         Connects to MySQL server and keeps connection open until this is called again or the connection is closed
         :param host: Host name/IP to connect to
         :param user: User on host to log in with
         :param password: User password
+        :param b_reset_schema: Whether schema should be reset upon connection
         """
         # If trying to connect to something else, make sure to close previous database first
         self.disconnect_server()
@@ -35,13 +36,16 @@ class PPPLDatabase:
             self.db_connection = mysql.connector.connect(host=host, user=user, password=password)
             self.db_cursor = self.db_connection.cursor()
             self.db_cursor.execute('use pppl')
+            # Reset schema if told to
+            if b_reset_schema:
+                self.reset_database_schema()
+            # Notify via callbacks that server is now connected and database is available
+            for table in Table:
+                for callback in self.insertion_callbacks_dict[table]:
+                    callback()
         except Exception:
             error_reporting.report_error(get_error())
             return
-        # Notify via callbacks that server is now connected and database is available
-        for table in Table:
-            for callback in self.insertion_callbacks_dict[table]:
-                callback()
 
     def disconnect_server(self):
         """
@@ -123,6 +127,7 @@ class PPPLDatabase:
                     penalties_committed int not null,
                     own_cups int not null,
                     aces int not null,
+                    serve_breaks int not null,
                     foreign key (player_id) references player(player_id),
                     foreign key (game_id) references game(game_id),
                     foreign key (footwear_id) references footwear(footwear_id)
@@ -161,6 +166,8 @@ class PPPLDatabase:
             self.db_cursor.execute(
                 "insert into role (role_name) values ('" + role_name + "')")
             self.db_connection.commit()
+        except mysql.connector.IntegrityError:
+            pass  # Ignore if role already exists
         except Exception:
             error_reporting.report_error(get_error())
             return
@@ -194,6 +201,60 @@ class PPPLDatabase:
             return
         # Perform callbacks upon successful insertion of role
         for callback in self.insertion_callbacks_dict[Table.PLAYER_ROLE]:
+            callback()
+
+    def insert_player_game(self, player_id, game_id, footwear_id, differential, knockovers, own_cups, aces,
+                           serve_breaks, penalty_shots_made, penalty_shots_attempted, penalties_committed):
+        try:
+            self.db_cursor.execute("""
+                insert into player_game (
+                    player_id,
+                    game_id,
+                    footwear_id,
+                    differential,
+                    knockovers,
+                    own_cups,
+                    aces,
+                    serve_breaks,
+                    penalty_shots_made,
+                    penalty_shots_attempted,
+                    penalties_committed
+                )
+                values (""" +
+                    str(player_id) + ',' +
+                    str(game_id) + ',' +
+                    str(footwear_id) + ',' +
+                    str(differential) + ',' +
+                    str(knockovers) + ',' +
+                    str(own_cups) + ',' +
+                    str(aces) + ',' +
+                    str(serve_breaks) + ',' +
+                    str(penalty_shots_made) + ',' +
+                    str(penalty_shots_attempted) + ',' +
+                    str(penalties_committed) + """
+                )"""
+            )
+            self.db_connection.commit()
+        except Exception:
+            error_reporting.report_error(get_error())
+            return
+        # Perform callbacks upon successful insertion of player game
+        for callback in self.insertion_callbacks_dict[Table.PLAYER_GAME]:
+            callback()
+
+    def insert_footwear(self, footwear_name):
+        try:
+            self.db_cursor.execute("""
+                insert into footwear (footwear_name)
+                values ('""" + footwear_name + """')
+            """)
+            self.db_connection.commit()
+        except mysql.connector.IntegrityError:
+            pass  # Ignore if trying to insert an existing footwear
+        except Exception:
+            error_reporting.report_error(get_error())
+        # Perform callbacks upon successful insertion of footwear
+        for callback in self.insertion_callbacks_dict[Table.FOOTWEAR]:
             callback()
 
     # SELECT RETURNING BOOLEAN
@@ -270,6 +331,56 @@ class PPPLDatabase:
         except Exception:
             error_reporting.report_error(get_error())
 
+    def get_footwear_names(self):
+        try:
+            self.db_cursor.execute("""
+                select footwear_name
+                from footwear
+            """)
+            raw_result = self.db_cursor.fetchall()
+            if len(raw_result) == 0:
+                return []
+            result = [row[0] for row in raw_result]
+            return result
+        except Exception:
+            error_reporting.report_error(get_error())
+
+    def get_footwear_id(self, footwear_name):
+        try:
+            self.db_cursor.execute("""
+                select footwear_id
+                from footwear
+                where footwear_name = '""" + footwear_name + """'
+                limit 1
+            """)
+            raw_result = self.db_cursor.fetchall()
+            if len(raw_result) == 0:
+                return -1
+            return raw_result[0][0]
+        except Exception:
+            error_reporting.report_error(get_error())
+
+    # SELECT returning multiple fields
+
+    def get_player_details(self, player_name):
+        try:
+            self.db_cursor.execute("""
+                select
+                    name,
+                    logo,
+                    headshot,
+                    player_id
+                from player
+                where name='""" + player_name + """'
+                limit 1
+            """)
+            raw_result = self.db_cursor.fetchall()
+            if len(raw_result) == 0:
+                return []
+            return raw_result[0]
+        except Exception:
+            error_reporting.report_error(get_error())
+
     def get_next_unplayed_game_details(self):
         try:
             self.db_cursor.execute("""
@@ -301,7 +412,6 @@ class PPPLDatabase:
     def register_insert_callback(self, table: Table, callback):
         if table in Table:
             self.insertion_callbacks_dict[table].append(callback)
-
 
 
 def get_error():
